@@ -3,7 +3,7 @@ from .pll import PLL1
 ##test
 
 
-class VSC(DAEModel):
+class VSC(DAEModel): #Bruker blokker istedet for diff.ligning. Skal ikke brukes
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -75,7 +75,7 @@ class VSC(DAEModel):
         return self.bus_idx_red['terminal'], self.I_inj(x, v)/i_n[self.bus_idx_red['terminal']]
 
 
-class VSC_PQ(DAEModel):
+class VSC_PQ(DAEModel): #En VSC som bruker P og Q som regulerings variable
     """
     Instantiate:
     'vsc': {
@@ -95,12 +95,12 @@ class VSC_PQ(DAEModel):
 
     def load_flow_pq(self):
         return self.bus_idx['terminal'], -self.par['p_ref']*self.par['S_n'], -self.par['q_ref']*self.par['S_n']
-
+        #Returnerer p_ref og q_ref samt terminal
     def int_par_list(self):
         return ['f']
 
     def bus_ref_spec(self):
-        return {'terminal': self.par['bus']}
+        return {'terminal': self.par['bus']} #Mapper terminalen mot riktig bus
 
     # endregion
 
@@ -115,7 +115,7 @@ class VSC_PQ(DAEModel):
         x_pll: pll q-axis integral
         angle: pll angle
         """
-        return ['i_d', 'i_q', 'x_p', 'x_q', 'x_pll', 'angle']
+        return ['i_d', 'i_q', 'x_p', 'x_q', 'x_pll', 'angle'] #Dette er alle 'state' variable
 
     def input_list(self):
         """
@@ -124,34 +124,35 @@ class VSC_PQ(DAEModel):
         p_ref: outer loop active power setpoint
         q_ref: outer loop reactive power setpoint
         """
-        return ['p_ref', 'q_ref']
+        return ['p_ref', 'q_ref'] #Dette er inputsa
 
     def state_derivatives(self, dx, x, v):
         dX = self.local_view(dx)
         X = self.local_view(x)
         par = self.par
 
-        dp = self.p_ref(x,v) - self.p_e(x, v)
+        dp = self.p_ref(x,v) - self.p_e(x, v) #Dette er reguleringavviket for d og q
         dq = -self.q_ref(x,v) + self.q_e(x, v)
-        i_d_ref = dp * par['k_p'] + X['x_p']
+        i_d_ref = dp * par['k_p'] + X['x_p'] #endrer i ref i henhold til error og reguleringparametre
         i_q_ref = dq * par['k_q'] + X['x_q']
 
         # Limiters
         i_ref = (i_d_ref+1j*i_q_ref)
-        i_ref = i_ref*par['i_max']/np.maximum(par['i_max'],abs(i_ref))
+        i_ref = i_ref*par['i_max']/np.maximum(par['i_max'],abs(i_ref)) #Setter grenser for i_ref for å ikke sakde vsc
         X['x_p'] = np.maximum(np.minimum(X['x_p'],par['i_max']),-par['i_max'])
         X['x_q'] = np.maximum(np.minimum(X['x_q'],par['i_max']),-par['i_max'])
 
-        dX['i_d'][:] = 1 / (par['T_i']) * (i_ref.real - X['i_d'])
+        dX['i_d'][:] = 1 / (par['T_i']) * (i_ref.real - X['i_d']) #diff.linging for dynamikken til strømmen.
         dX['i_q'][:] = 1 / (par['T_i']) * (i_ref.imag - X['i_q'])
-        dX['x_p'][:] = par['k_p'] / (par['T_p']) * dp
+
+        dX['x_p'][:] = par['k_p'] / (par['T_p']) * dp #Integrator leddet som lagrer error
         dX['x_q'][:] = par['k_q'] / (par['T_q']) * dq
-        dX['x_pll'][:] = par['k_pll'] / (par['T_pll']) * (self.v_q(x,v))
+        dX['x_pll'][:] = par['k_pll'] / (par['T_pll']) * (self.v_q(x,v)) #PLL for å synke med nettet
         dX['angle'][:] = X['x_pll']+par['k_pll']*self.v_q(x,v)
         #dX['angle'][:] = 0
         return
 
-    def init_from_load_flow(self, x_0, v_0, S):
+    def init_from_load_flow(self, x_0, v_0, S): #Henter ned PF løsning
         X = self.local_view(x_0)
 
         self._input_values['p_ref'] = self.par['p_ref']
